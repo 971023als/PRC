@@ -2,7 +2,7 @@
 
 . function.sh
 
-OUTPUT_CSV="output.csv"
+OUTPUT_CSV="vmware_syslog_check.csv"
 
 # Set CSV Headers if the file does not exist
 if [ ! -f $OUTPUT_CSV ]; then
@@ -10,18 +10,18 @@ if [ ! -f $OUTPUT_CSV ]; then
 fi
 
 # Initial Values
-category="웹 보안"
-code="SRV-044"
-riskLevel="중"
-diagnosisItem="파일 업로드 및 다운로드 크기 제한 검사"
-service="Account Management"
+category="기술적 보안"
+code="PRC-V-022"
+riskLevel="3"
+diagnosisItem="원격 로그 서버 이용"
+service="OS 가상화 시스템"
 diagnosisResult=""
 status=""
 
 BAR
 
-CODE="SRV-044"
-diagnosisItem="웹 서비스 파일 업로드 및 다운로드 용량 제한 미설정"
+CODE="PRC-V-022"
+diagnosisItem="원격 로그 서버 이용"
 
 # Write initial values to CSV
 echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
@@ -32,79 +32,60 @@ TMP1=$(basename "$0").log
 BAR
 
 cat << EOF >> $TMP1
-[양호]: 웹 서비스에서 파일 업로드 및 다운로드 용량이 적절하게 제한된 경우
-[취약]: 웹 서비스에서 파일 업로드 및 다운로드 용량이 제한되지 않은 경우
+[양호]: 원격 로그 서버 또는 스토리지가 연동 설정되어 있을 경우
+[취약]: 원격 로그 서버 또는 스토리지가 연동 설정되어 있지 않은 경우
 EOF
 
 BAR
 
-webconf_files=(".htaccess" "httpd.conf" "apache2.conf" "userdir.conf")
-file_exists_count=0
+# Function to check syslog configuration on ESXi hosts
+check_esxi_syslog() {
+    local esxi_host=$1
+    local syslog_config=$(ssh root@$esxi_host 'esxcli system syslog config get')
+    local log_host=$(echo "$syslog_config" | grep -i 'LogHost:' | awk '{print $2}')
 
-for webconf_file in "${webconf_files[@]}"; do
-    find_webconf_files=($(find / -name "$webconf_file" -type f 2>/dev/null))
-    for file in "${find_webconf_files[@]}"; do
-        ((file_exists_count++))
-        limit_request_body_count=$(grep -vE '^#|^\s#' "$file" | grep -i 'LimitRequestBody' | wc -l)
-        if [ $limit_request_body_count -eq 0 ]; then
-            diagnosisResult="Apache 설정 파일에 파일 업로드 및 다운로드 용량을 제한하는 설정이 없습니다: $file"
-            status="취약"
-            echo "WARN: $diagnosisResult" >> $TMP1
-            echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
-            cat $TMP1
-            echo ; echo
-            exit 0
-        fi
-    done
+    if [ "$log_host" != "None" ] && [ -n "$log_host" ]; then
+        diagnosisResult="ESXi 호스트 $esxi_host 원격 로그 서버가 설정되어 있습니다: $log_host"
+        status="양호"
+        echo "OK: $diagnosisResult" >> $TMP1
+    else
+        diagnosisResult="ESXi 호스트 $esxi_host 원격 로그 서버가 설정되어 있지 않습니다"
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    fi
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+}
+
+# Function to check vCenter for syslog configuration
+check_vcenter_syslog() {
+    local vcenter_host=$1
+    local syslog_config=$(ssh root@$vcenter_host 'curl -k -u administrator@vsphere.local:password -X GET "https://localhost:5480/rest/vcenter/settings/v1/configurations/4"')
+    local log_host=$(echo "$syslog_config" | grep -i 'Syslog.global.logHost' | awk -F':' '{print $2}' | tr -d '", ')
+
+    if [ "$log_host" != "None" ] && [ -n "$log_host" ]; then
+        diagnosisResult="vCenter 서버 $vcenter_host 원격 로그 서버가 설정되어 있습니다: $log_host"
+        status="양호"
+        echo "OK: $diagnosisResult" >> $TMP1
+    else
+        diagnosisResult="vCenter 서버 $vcenter_host 원격 로그 서버가 설정되어 있지 않습니다"
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    fi
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+}
+
+# Check for vCenter
+check_vcenter_syslog "vcenter_hostname"
+
+# Check for each ESXi host
+esxi_hosts=("esxi_host1" "esxi_host2" "esxi_host3")
+for esxi_host in "${esxi_hosts[@]}"; do
+    check_esxi_syslog $esxi_host
 done
 
-if [ $file_exists_count -eq 0 ]; then
-    diagnosisResult="Apache 설정 파일을 찾을 수 없습니다."
-    status="정보 없음"
-    echo "INFO: $diagnosisResult" >> $TMP1
-    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
-else
-    diagnosisResult="웹 서비스에서 파일 업로드 및 다운로드 용량이 적절하게 제한된 경우"
-    status="양호"
-    echo "OK: $diagnosisResult" >> $TMP1
-    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
-fi
-
+# Display results
 cat $TMP1
 
 echo ; echo
 
 cat $OUTPUT_CSV
-
-
-위에 형식으로 맞게 코드 만들어줘 json 형태 말고 csv 형태로
-
-VMWare vCenter,VMWare ESXi 
-
-어떠한 환경인지 파악하고 그거 맞는 쉘 스크립트 코드를 형태로 만들어줘
-
-
-
-평가항목ID	구분	통제분야	통제구분(대)	통제구분(중)	평가항목	위험도	상세설명	"평가대상
-(VMWare vCenter)"	"평가대상
-(VMWare ESXi)"	"판단방법
-(vCenter)"	"판단기준
-(vCenter)"	"판단방법
-(ESXi)"	"판단기준
-(ESXi)"
-
-PRC-V-022	기술적 보안	OS 가상화 시스템	2. 시스템 서비스 관리	3. 로그 관리	원격 로그 서버 이용	3	원격 로그 서버를 이용하여 로그 관리를 하지 않을 경우, 시스템 가용성 저하, 침해에 따른 로그 유실 등의 위협이 발생될 수 있으므로 원격 로그 서버를 이용한 로그 저장 여부를 점검	ㅇ	ㅇ	"* 아래 방법을 통해 Syslog 설정 여부를 확인
-
-    1. (방법) vCenter Server 관리 페이지(https://<주소>:5480/) 접속 후, 다음 메뉴에 접근하여 확인(vCenter 버전에 따라, 메뉴 명칭은 달라질 수 있음)
-       # ""Syslog"" > Syslog 설정 여부를 확인"	"* 양호 : 원격 로그 서버 또는 스토리지가 연동 설정되어 있을 경우 양호
-* 취약 : 원격 로그 서버 또는 스토리지가 연동 설정되어 있지 않은 경우 미흡"	"* 아래 방법을 통해 원격 로그 서버 사용 활성화 여부 확인
-
-    1. (방법1) SSH를 통해 ESXi 접속 후, 다음 명령어 실행 : Remote Host 확인
-       $ esxcli system syslog config get
-    2. (방법2) vSphere Client(ESXi) 접속 후, 다음 메뉴에 접근하여 확인(vSphere Client 버전에 따라, 메뉴 명칭은 달라질 수 있음)
-       # (5.5) ""관리"" > ""설정"" -> ""시스템"" -> ""고급 시스템 설정"" > Syslog.global.logHost 설정 확인
-       # (6.5/6.7/7.0) ""관리"" > ""시스템"" -> ""고급 시스템 설정"" > Syslog.global.logHost 설정 확인
-
-
-"	"* 양호 : Syslog.global.logHost가 syslog 수집 서버로 설정되어 있을 경우
-* 취약 : Syslog.global.logHost가 설정되어 있지 않을 경우"
