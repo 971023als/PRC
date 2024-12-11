@@ -1,19 +1,109 @@
-	PRC-C-026	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	2. 컨테이너 권한 관리	컨테이너의 privileged 플래그 실행	5	"privileged 플래그를 사용하여 컨테이너를 실행하는 경우, cgroup  컨트롤러 등에 의해 시행되는 모든 제한 사항이 제거되어, 컨테이너에서 호스트 시스템에 접근할 수 있는 보안 위협이 발생될 수 있으므로, privileged 플래그 제거 여부를 점검
+#!/bin/bash
 
-※ privileged 플래그가 설정되어 있을 경우 컨테이너에서 호스트 시스템의 디바이스에 대한 접근(Access) 권한을 부여"	ㅇ		ㅇ	"* 클러스터의 각 네임스페이스에서 사용중인 정책 중, privileged 설정 상태를 확인
+. function.sh
 
-  $ kubectl get pod [POD] -n [namespaces] -o jsonpath=""{range .spec.containers[*]}{.name}|securityContext.privileged:'{.securityContext.privileged}'{''}{end}"""	"* 양호 - 'privileged'가 false로 설정되어 있는 경우
-* 취약 - 'privileged'가 true로 설정되어 있는 경우
+OUTPUT_CSV="output.csv"
 
-※ default : false
-※ 'kube-system' 네임스페이스에 포함된, 쿠버네티스 마스터 컴포넌트(API Server, Scheduler, Controller-manager 등), 시스템 애드온(DNS 서비스, 대시보스, 리소스 메트릭 서버 등) 등 기타 시스템(로그 수집기, 모니터링 에이전트 등)의 경우 대상에서 제외 (단, 'kube-public'은 포함)"			"**아래 명령어 실행 후, 컨테이너에 적용된 privileged 값 확인**
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
 
-* (방법) docker 명령어를 사용하여 'HostConfig.Privileged' 설정 값 확인
-> $ docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: Privileged={{ .HostConfig.Privileged }}'
->> container_id1: Privileged=false
->> container_id2: Privileged=true"	"* 양호 - ""privileged"" 값이 true로 설정된 컨테이너가 존재하지 않을 경우
-* 취약 - ""privileged"" 값이 true로 설정된 컨테이너가 존재할 경우
+# Initial Values
+category="기술적 보안"
+code="PRC-C-026"
+riskLevel="5"
+diagnosisItem="컨테이너의 privileged 플래그 실행"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
 
-※ 기본값 : false"													
+BAR
+
+CODE="PRC-C-026"
+diagnosisItem="컨테이너의 privileged 플래그 실행"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: privileged 플래그가 설정되지 않거나 false로 설정된 경우
+[취약]: privileged 플래그가 true로 설정된 경우
+EOF
+
+BAR
+
+# Function to check Kubernetes Pods for privileged flag
+check_kubernetes_privileged() {
+    kubectl get pod -n [namespace] -o jsonpath="{range .items[*]}{.metadata.name}{': '}{.spec.containers[*].name}{' | privileged: '}{.spec.securityContext.privileged}{'\n'}{end}" > $TMP1
+
+    while read -r line; do
+        pod_name=$(echo $line | cut -d ':' -f1)
+        container_info=$(echo $line | cut -d ':' -f2)
+        privileged_flag=$(echo $container_info | awk -F 'privileged: ' '{print $2}' | cut -d ' ' -f1)
+
+        if [[ "$privileged_flag" == "true" ]]; then
+            diagnosisResult="privileged 플래그가 설정됨"
+            status="취약"
+        else
+            diagnosisResult="privileged 플래그가 설정되지 않음"
+            status="양호"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "$pod_name: $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Function to check Docker containers for privileged flag
+check_docker_privileged() {
+    docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: Privileged={{ .HostConfig.Privileged }}' > $TMP1
+
+    while read -r line; do
+        if [[ "$line" == *"Privileged=true"* ]]; then
+            diagnosisResult="privileged 플래그가 설정됨"
+            status="취약"
+        else
+            diagnosisResult="privileged 플래그가 설정되지 않음"
+            status="양호"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "$line: $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Function to check Docker configuration for privileged flag
+check_docker_daemon_json() {
+    sudo cat /etc/docker/daemon.json | grep -q "privileged"
+    if [ $? -eq 0 ]; then
+        diagnosisResult="privileged 플래그가 설정됨"
+        status="취약"
+    else
+        diagnosisResult="privileged 플래그가 설정되지 않음"
+        status="양호"
+    fi
+
+    # Output result to CSV
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Docker daemon.json privileged: $diagnosisResult" >> $TMP1
+}
+
+# Run the checks for Kubernetes and Docker
+check_kubernetes_privileged
+check_docker_privileged
+check_docker_daemon_json
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
