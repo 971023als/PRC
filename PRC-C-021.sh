@@ -1,13 +1,75 @@
-	PRC-C-021	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	1. 컨테이너 런타임	데몬의 사용자 영역(userland) 프록시 사용	3	"사용자 영역(userland) 프록시는 컨테이너와 호스트 또는 다른 컨테이너 사이의 네트워크 통신을 가능하게 하는데 사용되나, 사용자 영역 프록시를 사용할 경우 시스템 부하 등의 보안 위협이 발생될 수 있으므로 사용자 영역(userland) 프록시 사용 여부를 점검
+#!/bin/bash
 
-※ userland-proxy : 호스트와 컨테이너 간의 포트 포워딩을 담당하는 컴포넌트"			ㅇ					"* (방법1) PS 명령어를 사용하여 Docker 데몬(dockerd) 명령줄의 'userland-proxy' 인자값 확인
-> $ ps -ef | grep 'dockerd' | grep ""userland-proxy"" | grep -v grep
->> root     12345   1     0   Jul09   ?   00:00:00 dockerd --userland-proxy
-* (방법2) docker 설정파일(/etc/docker/daemon.json)을 열어 'userland-proxy' 값 확인
-> $ sudo cat /etc/docker/daemon.json | grep ""userland-proxy""
->> ""userland-proxy"": true,"	"* 양호: Userland Proxy 설정이 false로 설정되어 있는 경우
-* 취약: Userland Proxy 설정이 존재하지 않거나, true로 설정되어 있는 경우
+. function.sh
 
-※ 기본값 : true (활성화)"													
+OUTPUT_CSV="output.csv"
+
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-021"
+riskLevel="3"
+diagnosisItem="데몬의 사용자 영역(userland) 프록시 사용"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-021"
+diagnosisItem="데몬의 사용자 영역(userland) 프록시 사용"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: Userland Proxy가 비활성화된 경우 (false)
+[취약]: Userland Proxy가 활성화된 경우 (true) 또는 설정되지 않은 경우
+EOF
+
+BAR
+
+# Function to check if Docker is using userland proxy
+check_userland_proxy() {
+    # Check if the docker daemon is using userland proxy (via dockerd command line)
+    ps -ef | grep 'dockerd' | grep -- 'userland-proxy' > $TMP1
+    if [ $? -eq 0 ]; then
+        userland_proxy=$(ps -ef | grep 'dockerd' | grep 'userland-proxy' | awk -F '--userland-proxy=' '{print $2}' | sed 's/^[[:space:]]*//')
+        diagnosisResult="Userland Proxy 사용됨: $userland_proxy"
+        status="취약"
+    else
+        # Check docker configuration file for userland-proxy setting
+        sudo cat /etc/docker/daemon.json | grep "userland-proxy" > $TMP1
+        if [ $? -eq 0 ]; then
+            userland_proxy=$(sudo cat /etc/docker/daemon.json | grep "userland-proxy" | awk -F ': ' '{print $2}' | sed 's/[",]//g')
+            diagnosisResult="Userland Proxy 사용됨: $userland_proxy"
+            status="취약"
+        else
+            diagnosisResult="Userland Proxy 설정 없음"
+            status="양호"
+        fi
+    fi
+
+    # Output result for Userland Proxy check
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Userland Proxy Check: $diagnosisResult" >> $TMP1
+}
+
+# Run the check for userland proxy usage
+check_userland_proxy
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV

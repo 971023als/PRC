@@ -1,14 +1,79 @@
-	PRC-C-020	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	1. 컨테이너 런타임	실험적 기능 비활성화	3	실험적 기능 설정이 적용 되어 있을 경우 안정적이지 않은 기능이 활성화되어 시스템 안정성에 영향일 끼칠 수 있으므로, 실험적 기능 비활성화 여부를 점검			ㅇ					"**실험적 기능('.Server.Experimental' 옵션) 활성화 여부 확인**
+#!/bin/bash
 
-* (방법1) docker 명령어를 사용하여 'Server.Experimental' 설정 값 확인
-> $ docker info --format '{{ .Server.Experimental }}'
->> false
+. function.sh
 
-* (방법2) docker 설정파일(/etc/docker/daemon.json)을 열어 'experimental' 값 확인
-> $ sudo cat /etc/docker/daemon.json | grep ""experimental""
->> ""experimental"": true"	"* 양호: 실험적 기능이 비활성화 되어 있는 경우
-* 취약: 실험적 기능이 활성화 되어 있는 경우
+OUTPUT_CSV="output.csv"
 
-※ 기본값 : false (비활성화)"													
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-020"
+riskLevel="3"
+diagnosisItem="실험적 기능 비활성화"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-020"
+diagnosisItem="실험적 기능 비활성화"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 실험적 기능이 비활성화 되어 있는 경우 (false)
+[취약]: 실험적 기능이 활성화 되어 있는 경우 (true)
+EOF
+
+BAR
+
+# Function to check if experimental features are enabled in Docker
+check_experimental_feature() {
+    # Check using Docker info command
+    docker_info_output=$(docker info --format '{{ .Server.Experimental }}')
+    if [ "$docker_info_output" == "true" ]; then
+        diagnosisResult="실험적 기능 활성화됨: $docker_info_output"
+        status="취약"
+    else
+        # Check in the Docker configuration file for 'experimental' setting
+        sudo cat /etc/docker/daemon.json | grep "experimental" > $TMP1
+        if [ $? -eq 0 ]; then
+            experimental_value=$(sudo cat /etc/docker/daemon.json | grep "experimental" | awk -F ': ' '{print $2}' | sed 's/[",]//g')
+            if [ "$experimental_value" == "true" ]; then
+                diagnosisResult="실험적 기능 활성화됨: $experimental_value"
+                status="취약"
+            else
+                diagnosisResult="실험적 기능 비활성화됨"
+                status="양호"
+            fi
+        else
+            diagnosisResult="실험적 기능 설정 없음"
+            status="양호"
+        fi
+    fi
+
+    # Output result for experimental feature check
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Experimental Feature Check: $diagnosisResult" >> $TMP1
+}
+
+# Run the check for experimental feature status
+check_experimental_feature
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
