@@ -1,11 +1,71 @@
-	PRC-C-023	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	1. 컨테이너 런타임	Docker의 기본 네트워크 인터페이스(docker0) 사용	3	"Docker가 기본 네트워크 인터페이스(docker0)를 사용할 경우 컨테이너들은 동일한 네트워크 대역을 공유하게되며, 호스트 시스템과 직접적으로 통신하게 되며, ARP Spoofing 및 MAC Flooding 등의 공격에 취약할 수 있으므로, docker0가 아닌 사용자 정의 네트워크 사용 여부를 점검
+#!/bin/bash
 
-※ docker0 사용 옵션이 비활성화(false)로 되어 있을 경우 컨테이너는 자동으로 'docker0' 브리지에 연결되지 않아 컨테이너들이 호스트와 네트워크 통신을 할 수 없게되며, 활성화(true) 되어 있을 경우 컨테이너들이 호스트와 네트워크 통신이 가능"			ㅇ					"**아래 명령어 실행 후, 'com.docker.network.bridge.default_bridge' 설정 확인**
-> $ docker network ls --quiet | xargs docker network inspect --format '{{ .Name }}: {{ .Options }}' 
->> bridge: map[com.docker.network.bridge.default_bridge:true com.docker.network.bridge.enable_icc:true com.docker.network.bridge.enable_ip_masquerade:true com.docker.network.bridge.host_binding_ipv4:0.0.0.0 com.docker.network.bridge.name:docker0 com.docker.network.driver.mtu:1500]
-"	"* 양호: 'com.docker.network.bridge.default_bridge' 값이 false일 경우
-* 취약: 'com.docker.network.bridge.default_bridge' 값이 true 경우
+. function.sh
 
-※ 기본값 : true (활성화)"													
+OUTPUT_CSV="output.csv"
+
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-023"
+riskLevel="3"
+diagnosisItem="Docker의 기본 네트워크 인터페이스(docker0) 사용"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-023"
+diagnosisItem="Docker의 기본 네트워크 인터페이스(docker0) 사용"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: com.docker.network.bridge.default_bridge 값이 false인 경우
+[취약]: com.docker.network.bridge.default_bridge 값이 true인 경우
+EOF
+
+BAR
+
+# Function to check if Docker is using the default bridge network (docker0)
+check_default_bridge_network() {
+    docker network ls --quiet | xargs docker network inspect --format '{{ .Name }}: {{ .Options }}' | grep "com.docker.network.bridge.default_bridge" > $TMP1
+    if [ $? -eq 0 ]; then
+        bridge_value=$(docker network ls --quiet | xargs docker network inspect --format '{{ .Name }}: {{ .Options }}' | grep "com.docker.network.bridge.default_bridge" | awk -F ': ' '{print $2}' | sed 's/[",]//g')
+        if [ "$bridge_value" == "false" ]; then
+            diagnosisResult="docker0 사용 비활성화됨"
+            status="양호"
+        else
+            diagnosisResult="docker0 사용 활성화됨"
+            status="취약"
+        fi
+    else
+        diagnosisResult="docker0 값 미설정"
+        status="취약"
+    fi
+
+    # Output result for Default Bridge Network check
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Docker Default Network (docker0): $diagnosisResult" >> $TMP1
+}
+
+# Run the check for Docker's default bridge network setting
+check_default_bridge_network
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
