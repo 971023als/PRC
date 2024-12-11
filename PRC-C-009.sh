@@ -1,39 +1,142 @@
-	PRC-C-009	기술적 보안	"컨테이너
-가상화
-시스템"	2. 시스템 서비스 관리	3. 로그 관리	시스템 주요 이벤트 로그 설정 미흡	3	시스템 주요 이벤트 로그가 설정되어 있지 않을 경우 시스템 문제 발생 시 보안, 성능 등의 이슈를 파악하기 어려움으로 시스템, 가상머신, 보안 등의 로그가 저장되도록 설정되어 있는지를 점검	ㅇ	ㅇ	ㅇ	"* API 서버 설정 파일(kube-apiserver.yaml) 또는 프로세스에서 감사 로그 경로 설정 여부를 확인
+#!/bin/bash
 
-  - (방법1) $ ps -ef | grep apiserver | grep -E audit-log-path | grep -v grep
-  - (방법2) $ grep -E ""audit-log-path"" ""/etc/kubernetes/manifests/kube-apiserver.yaml""
-  - (방법3) $ kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath=""{range .items[]}{.spec.containers[].command} {''}{end}"" | grep -E ""audit-log-path"" 
+. function.sh
 
+OUTPUT_CSV="output.csv"
 
-* API 서버 설정 파일(kube-apiserver.yaml) 또는 프로세스에서 감사 로그 정책 설정 여부를 확인
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
 
-  - (방법1) $ ps -ef | grep apiserver | grep -E audit-policy-file | grep -v grep
-  - (방법2) $ grep -E ""audit-policy-file"" ""/etc/kubernetes/manifests/kube-apiserver.yaml""
-  - (방법3) $ kubectl get pods -n kube-system -l component=kube-apiserver -o jsonpath=""{range .items[]}{.spec.containers[].command} {''}{end}"" | grep -E ""audit-policy-file"" "	"* 양호 - 'audit-log-path', 'audit-policy-file'가 설정되어 있을 경우
-* 취약 - 'audit-log-path', 'audit-policy-file'가 미설정 되어 있을 경우"	"* kubelet 서비스 설정파일을 통해 ""v"" 설정을 확인
+# Initial Values
+category="기술적 보안"
+code="PRC-C-009"
+riskLevel="3"
+diagnosisItem="시스템 주요 이벤트 로그 설정 미흡"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
 
-  - (방법1) $ ps -ef | grep kubelet | grep -v 'grep' | awk -v pattern=""--v""
-  - (방법2) $ grep -q ""--v"" ""/var/lib/kubelet/config.yaml""
-  - (방법3) $ grep -q ""--v"" ""/etc/systemd/system/kubelet.service.d/10-kubeadm.conf""
-  - (방법4) $ grep -q ""--v"" ""/lib/systemd/system/kubelet.service""
-  - (방법5) $ grep -q ""--v"" ""/var/lib/kubelet/config.yaml"""	"* 양호 - v 플래그가 3 이상으로 설정되어 있을 경우
-* 취약 - v 플래그가 3 미만으로 미설정 되어 있을 경우
+BAR
 
-※ Default : --v=0"	"**로그 설정 레벨(log-level)은 Docker의 로깅 시스템에서 사용되는 설정(trace, debug, info, warn, error, fatal)으로 관련 설정 존재 여부를 확인하며, 기본 log-level은 info로 설정**
+CODE="PRC-C-009"
+diagnosisItem="시스템 주요 이벤트 로그 설정 미흡"
 
-* (방법1) PS 명령어를 사용하여 Docker 데몬(dockerd) 명령줄의 'log-level' 인자값 확인
-> $ ps -ef | grep 'dockerd' | grep ""log-level"" | grep -v grep
->> root     12345   1     0   Jul09   ?   00:00:00 dockerd --log-level=info
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
 
-* (방법2) docker 설정파일(/etc/docker/daemon.json)을 열어 'log-level' 값 확인
-> $ sudo cat /etc/docker/daemon.json | grep ""log-level""
->>""log-level"": ""info""
+TMP1=$(basename "$0").log
+> $TMP1
 
-* (방법3) 아래 명령어 실행 후, 'log-level' 값 확인
-> $ docker network ls --quiet | xargs docker network inspect --format '{{ .Name }}: {{ .Options }}' 
->>bridge: map[com.docker.network.bridge.default_bridge\:true com.docker.network.bridge.enable_icc\:true log-driver\:json-file log-level\:info]"	"* 양호: 로그 기록 정책이 내부 정책에 부합하게 설정되어 있는 경우 (없을 경우 info 이상)
-* 취약: 로그 기록 정책이 내부 정책에 부합하게 설정되지 않은 경우
+BAR
 
-※ Default : log-level=info"													
+cat << EOF >> $TMP1
+[양호]: 시스템 주요 이벤트 로그 설정이 되어 있는 경우
+[취약]: 시스템 주요 이벤트 로그 설정이 되어 있지 않거나 설정이 부족한 경우
+EOF
+
+BAR
+
+# Function to check audit-log-path for kube-apiserver
+check_kube_apiserver_audit_log() {
+    # Check if audit-log-path is configured for kube-apiserver
+    audit_log_path=$(ps -ef | grep apiserver | grep -E "audit-log-path" | grep -v grep)
+    if [[ ! -z "$audit_log_path" ]]; then
+        diagnosisResult="audit-log-path 설정이 있음"
+        status="양호"
+    else
+        diagnosisResult="audit-log-path 설정이 없음"
+        status="취약"
+    fi
+
+    # Output result for kube-apiserver audit log
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Kube-apiserver 감사 로그 경로 설정 확인: $diagnosisResult" >> $TMP1
+}
+
+# Function to check audit-policy-file for kube-apiserver
+check_kube_apiserver_audit_policy() {
+    # Check if audit-policy-file is configured for kube-apiserver
+    audit_policy_file=$(ps -ef | grep apiserver | grep -E "audit-policy-file" | grep -v grep)
+    if [[ ! -z "$audit_policy_file" ]]; then
+        diagnosisResult="audit-policy-file 설정이 있음"
+        status="양호"
+    else
+        diagnosisResult="audit-policy-file 설정이 없음"
+        status="취약"
+    fi
+
+    # Output result for kube-apiserver audit policy
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Kube-apiserver 감사 로그 정책 설정 확인: $diagnosisResult" >> $TMP1
+}
+
+# Function to check log level for kubelet
+check_kubelet_log_level() {
+    # Check if log level is configured for kubelet (v flag for verbosity)
+    kubelet_log_level=$(ps -ef | grep kubelet | grep -v 'grep' | awk -v pattern="--v")
+    if [[ ! -z "$kubelet_log_level" ]]; then
+        if [[ "$kubelet_log_level" =~ "--v=3" || "$kubelet_log_level" =~ "--v=4" || "$kubelet_log_level" =~ "--v=5" ]]; then
+            diagnosisResult="v 플래그가 3 이상으로 설정됨"
+            status="양호"
+        else
+            diagnosisResult="v 플래그가 3 미만으로 설정됨"
+            status="취약"
+        fi
+    else
+        diagnosisResult="v 플래그 설정이 없음"
+        status="취약"
+    fi
+
+    # Output result for kubelet log level
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Kubelet 로그 수준(v 플래그) 설정 확인: $diagnosisResult" >> $TMP1
+}
+
+# Function to check log-level for dockerd
+check_docker_log_level() {
+    # Check if log-level is configured for Docker daemon
+    docker_log_level=$(ps -ef | grep 'dockerd' | grep "log-level" | grep -v grep)
+    if [[ ! -z "$docker_log_level" ]]; then
+        diagnosisResult="log-level 설정이 있음"
+        status="양호"
+    else
+        diagnosisResult="log-level 설정이 없음"
+        status="취약"
+    fi
+
+    # Output result for Docker log level
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Docker 로그 수준 설정 확인: $diagnosisResult" >> $TMP1
+}
+
+# Function to check if Docker daemon.json file contains log-level
+check_docker_daemon_config() {
+    docker_config_log_level=$(sudo cat /etc/docker/daemon.json | grep "log-level")
+    if [[ ! -z "$docker_config_log_level" ]]; then
+        diagnosisResult="daemon.json 파일에 log-level 설정이 있음"
+        status="양호"
+    else
+        diagnosisResult="daemon.json 파일에 log-level 설정이 없음"
+        status="취약"
+    fi
+
+    # Output result for Docker daemon.json log level
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Docker 설정 파일에서 log-level 설정 확인: $diagnosisResult" >> $TMP1
+}
+
+# Run checks for kube-apiserver audit-log-path, audit-policy-file, kubelet log-level, and docker log-level
+check_kube_apiserver_audit_log
+check_kube_apiserver_audit_policy
+check_kubelet_log_level
+check_docker_log_level
+check_docker_daemon_config
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
