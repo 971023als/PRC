@@ -1,18 +1,90 @@
-	PRC-C-041	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	5. 컨테이너 네임스페이스	호스트의 사용자 네임스페이스 공유	3	"사용자 네임스페이스 기능을 사용할 경우 컨테이너 내의 사용자 ID와 그룹 ID를 호스트와 분리할 경우, 컨테이너 내부에서 root 권한을 가진 프로세스가 호스트 시스템에서도 root 권한을 갖지 않도록 하는 등 컨테이너 내부에서 실행되는 프로세스가 호스트 시스템에 불필요한 권한을 갖지 않게 하기 위해, 호스트의 사용자 네임스페이스(User namespaces)를 공유하지 않도록 설정되어 있는지를 점검
+#!/bin/bash
 
-* User namespace : 컨테이너 내부와 외부에서 사용자 ID와 그룹 ID를 분리하여, 컨테이너 내에서 root 권한을 가진 프로세스가 호스트 시스템에서도 root 권한을 갖지 않도록 하는 Linux 커널의 기능으로, 비활성화(disabled) 되어 있을 경우, 컨테이너 내의 'root' 사용자가 호스트 시스템의 'root' 사용자와 직접 매핑"			ㅇ					"**아래 명령어 실행 후, 'HostConfig.UsernsMode' 설정 확인**
-> $ docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: UsernsMode={{ .HostConfig.UsernsMode }}'
->> - container_id1: UsernsMode=host      # 컨테이너가 호스트의 유저 네임스페이스를 공유
->> - container_id2: UsernsMode=default  # 컨테이너가 자체적인 유저 네임스페이스를 사용
->> - container_id3: UsernsMode=container:container_id4 # 컨테이너가 다른 컨테이너의 유저 네임스페이스를 공유
+. function.sh
 
-**아래 명령어 실행 후, 'userns-remap' 설정 확인**
-> $ docker info --format '{{ .SecurityOptions }}' 
->> [apparmor seccomp profile=default name=userns] # 'name=userns' 포함 시, 'userns-remap' 활성화"	"* 양호 : 'userns-remap' 설정이 활성화되어 있고, 모든 컨테이너에서 UsernsMode가 ""host""가 아닌 경우, 'userns-remap' 설정이 활성화되어 있지 않으나 UsernsMode가 ""host"", ""default'로 설정되어 있는 컨테이너가 존재하지 않을 경우
-* 취약 : 'UsernsMode'가 ""host""로 설정된 컨테이너가 존재할 경우, 'userns-remap' 설정이 없고, 'UsernsMode'가 ""host"" 또는 ""default""로 설정되어 있는 컨테이너가 존재할 경우
+OUTPUT_CSV="output.csv"
 
-※ Default : UsernsMode는 별도 지정되지 않으며, 아래 정책을 따라감
- - (userns-remap 비활성화) 컨테이너는 호스트 시스템의 사용자 ID와 그룹ID를 그대로 사용(컨테이너 내의 루트 사용자는 호스트 시스템의 루트 사용자와 동일한 권한)
- - (userns-remap 활성화) 컨테이너는 재매핑된 사용자 ID를 사용(컨테이너 내부의 루트 사용자는 호스트 시스템의 루트 사용자와 다른 권한을 가짐)"													
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-041"
+riskLevel="3"
+diagnosisItem="호스트의 사용자 네임스페이스 공유"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-041"
+diagnosisItem="호스트의 사용자 네임스페이스 공유"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 'userns-remap' 설정이 활성화되어 있고, 모든 컨테이너에서 UsernsMode가 'host'가 아닌 경우
+[취약]: 'UsernsMode'가 'host'로 설정된 컨테이너가 존재할 경우, 'userns-remap' 설정이 없고, 'UsernsMode'가 'host' 또는 'default'로 설정되어 있는 컨테이너가 존재할 경우
+EOF
+
+BAR
+
+# Function to check UsernsMode setting for Docker containers
+check_docker_userns_mode() {
+    container_id=$1
+
+    # Retrieve UsernsMode configuration from the container's HostConfig
+    userns_mode=$(docker inspect --format '{{ .Id }}: UsernsMode={{ .HostConfig.UsernsMode }}' $container_id)
+
+    # Check if UsernsMode is set to host (container shares the host's user namespace)
+    if [[ "$userns_mode" =~ "UsernsMode=host" || "$userns_mode" =~ "UsernsMode=default" ]]; then
+        diagnosisResult="Container $container_id shares the host's user namespace."
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    else
+        diagnosisResult="Container $container_id does not share the host's user namespace."
+        status="양호"
+    fi
+
+    # Output to CSV
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+}
+
+# Checking UsernsMode setting for Docker containers
+docker_containers=$(docker ps --quiet --all)
+
+for container_id in $docker_containers; do
+    check_docker_userns_mode $container_id
+done
+
+# Check if userns-remap is enabled
+check_userns_remap() {
+    security_options=$(docker info --format '{{ .SecurityOptions }}')
+
+    if [[ "$security_options" =~ "name=userns" ]]; then
+        userns_remap="활성화됨"
+    else
+        userns_remap="비활성화됨"
+    fi
+
+    echo "userns-remap 설정: $userns_remap" >> $TMP1
+}
+
+# Checking userns-remap configuration
+check_userns_remap
+
+# Display results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
