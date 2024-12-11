@@ -1,12 +1,109 @@
-	PRC-C-028	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	2. 컨테이너 권한 관리	불필요한 커널 접근 권한 제거	4	"높은 수준의 커널 접근 권한(capabilities)을 제거 하지 않을 경우, 컨테이너는 호스트 시스템의 커널에 높은 접근 권한을 가질 수 있으므로, 업무상 필요하지 않은 capabilities를 제거(drop)하였는지를 점검
+#!/bin/bash
 
-※ SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_OVERRIDE, SETUID, SETGID, SYS_MODULE"	ㅇ			"* 개별 POD에서 capabilities 설정의 적용 여부를 확인
+. function.sh
 
-  $ kubectl get pod [POD] -n [namespaces] -o jsonpath=""{range .spec.containers[*]}{.name}|securityContext.capabilities.drop:'{.securityContext.capabilities.drop}'{''}{end}"""	"* 양호 - capability.drop에 SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_OVERRIDE, SETUID, SETGID, SYS_MODULE 등이 부여되어 있을 경우
-* 취약 - capability.drop에 SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_OVERRIDE, SETUID, SETGID, SYS_MODULE 등이 부여되어 있지 않을 경우
+OUTPUT_CSV="output.csv"
 
-※ capability.drop과 capability.add에 동시 적용되어 있을 경우, capability.drop이 적용
-※ 서버보안 솔루션에서 해당 기능을 통제할 경우 양호
-※ 'kube-system' 네임스페이스에 포함된, 쿠버네티스 마스터 컴포넌트(API Server, Scheduler, Controller-manager 등), 시스템 애드온(DNS 서비스, 대시보스, 리소스 메트릭 서버 등) 등 기타 시스템(로그 수집기, 모니터링 에이전트 등)의 경우 대상에서 제외 (단, 'kube-public'은 포함)"																	
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-028"
+riskLevel="4"
+diagnosisItem="불필요한 커널 접근 권한 제거"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-028"
+diagnosisItem="불필요한 커널 접근 권한 제거"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: capability.drop에 SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_OVERRIDE, SETUID, SETGID, SYS_MODULE 등이 부여된 경우
+[취약]: capability.drop에 SYS_ADMIN, NET_ADMIN, SYS_PTRACE, SYS_CHROOT, DAC_OVERRIDE, SETUID, SETGID, SYS_MODULE 등이 부여되지 않은 경우
+EOF
+
+BAR
+
+# Function to check capabilities in Kubernetes Pods
+check_kubernetes_capabilities() {
+    kubectl get pod -n [namespace] -o jsonpath="{range .items[*]}{.metadata.name}{': '}{.spec.containers[*].name}{' | capabilities.drop: '}{.spec.securityContext.capabilities.drop}{'\n'}{end}" > $TMP1
+
+    while read -r line; do
+        pod_name=$(echo $line | cut -d ':' -f1)
+        container_info=$(echo $line | cut -d ':' -f2)
+        capabilities_drop=$(echo $container_info | awk -F 'capabilities.drop: ' '{print $2}' | cut -d ' ' -f1)
+
+        if [[ "$capabilities_drop" == *"SYS_ADMIN"* || "$capabilities_drop" == *"NET_ADMIN"* || "$capabilities_drop" == *"SYS_PTRACE"* || "$capabilities_drop" == *"SYS_CHROOT"* || "$capabilities_drop" == *"DAC_OVERRIDE"* || "$capabilities_drop" == *"SETUID"* || "$capabilities_drop" == *"SETGID"* || "$capabilities_drop" == *"SYS_MODULE"* ]]; then
+            diagnosisResult="필요하지 않은 커널 접근 권한 제거됨"
+            status="양호"
+        else
+            diagnosisResult="필요하지 않은 커널 접근 권한 제거되지 않음"
+            status="취약"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "$pod_name: $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Function to check capabilities in Docker containers
+check_docker_capabilities() {
+    docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: Capabilities={{ .HostConfig.Capabilities }}' > $TMP1
+
+    while read -r line; do
+        if [[ "$line" == *"SYS_ADMIN"* || "$line" == *"NET_ADMIN"* || "$line" == *"SYS_PTRACE"* || "$line" == *"SYS_CHROOT"* || "$line" == *"DAC_OVERRIDE"* || "$line" == *"SETUID"* || "$line" == *"SETGID"* || "$line" == *"SYS_MODULE"* ]]; then
+            diagnosisResult="필요하지 않은 커널 접근 권한 제거됨"
+            status="양호"
+        else
+            diagnosisResult="필요하지 않은 커널 접근 권한 제거되지 않음"
+            status="취약"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "$line: $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Function to check Docker configuration for capabilities
+check_docker_daemon_json() {
+    sudo cat /etc/docker/daemon.json | grep -q "capabilities"
+    if [ $? -eq 0 ]; then
+        diagnosisResult="커널 접근 권한 설정이 완료됨"
+        status="양호"
+    else
+        diagnosisResult="커널 접근 권한 설정되지 않음"
+        status="취약"
+    fi
+
+    # Output result to CSV
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Docker daemon.json capabilities: $diagnosisResult" >> $TMP1
+}
+
+# Run the checks for Kubernetes and Docker
+check_kubernetes_capabilities
+check_docker_capabilities
+check_docker_daemon_json
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
