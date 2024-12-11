@@ -1,19 +1,82 @@
-	PRC-C-022	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	1. 컨테이너 런타임	레지스트리 연결 구간에 대한 보안 프로토콜 사용	2	"레지스트리 연결 시, 통신구간 암호화가 적용되지 않을 경우 중간자 공격 등에 의한 리소스 위변조 등이 발생될 수 있으므로 레지스트리 연결 구간에 암호화 통신 여부를 점검
+#!/bin/bash
 
-"			ㅇ					"**Insecure Registry는 보안 프로토콜이 적용되지 않은 레지스트리를 사용할 때 설정하며, Insecure Registry에 레지스트리를 적용할 경우 비암호화 통신(HTTP)을 통해 레지스트리와 통신 가능**
+. function.sh
 
-* (방법1) PS 명령어를 사용하여 Docker 데몬(dockerd) 명령줄의 'insecure-registry' 인자값 확인
-> $ ps -ef | grep 'dockerd' | grep ""insecure-registry"" | grep -v grep
->> root     12345   1     0   Jul09   ?   00:00:00 dockerd --insecure-registry=test.registry.com
+OUTPUT_CSV="output.csv"
 
-* (방법2) docker 설정파일(/etc/docker/daemon.json)을 열어 'insecure-registries' 값 확인
-> $ sudo cat /etc/docker/daemon.json | grep ""insecure-registries""
->> ""insecure-registries"": [""my.insecure.registry.com""]
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
 
-* (방법3) 아래 명령어 실행 후, '.RegistryConfig.InsecureRegistryCIDRs' 값 확인
-> $ docker info --format 'Insecure Registries: {{.RegistryConfig.InsecureRegistryCIDRs}}'
->> Insecure Registries: [test.registry.com]"	"* 양호: Insecure Registry가 사용되고 있지 않을 경우 (단, insecure registry 주소가 localhost(127.0.01)일 경우 양호, 레지스트리가 https 만 제공할 경우 양호)
-* 취약: Insecure Registry가 사용되고 있을 경우
-"													
+# Initial Values
+category="기술적 보안"
+code="PRC-C-022"
+riskLevel="2"
+diagnosisItem="레지스트리 연결 구간에 대한 보안 프로토콜 사용"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-022"
+diagnosisItem="레지스트리 연결 구간에 대한 보안 프로토콜 사용"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: Insecure Registry가 사용되지 않거나, 레지스트리가 https만 제공하는 경우
+[취약]: Insecure Registry가 사용되는 경우
+EOF
+
+BAR
+
+# Function to check if Docker is using Insecure Registries
+check_insecure_registry() {
+    # Check if the docker daemon is using insecure registries (via dockerd command line)
+    ps -ef | grep 'dockerd' | grep -- 'insecure-registry' > $TMP1
+    if [ $? -eq 0 ]; then
+        insecure_registry=$(ps -ef | grep 'dockerd' | grep 'insecure-registry' | awk -F '--insecure-registry=' '{print $2}' | sed 's/^[[:space:]]*//')
+        diagnosisResult="Insecure Registry 사용됨: $insecure_registry"
+        status="취약"
+    else
+        # Check docker configuration file for insecure-registries setting
+        sudo cat /etc/docker/daemon.json | grep "insecure-registries" > $TMP1
+        if [ $? -eq 0 ]; then
+            insecure_registry=$(sudo cat /etc/docker/daemon.json | grep "insecure-registries" | awk -F ': ' '{print $2}' | sed 's/[",]//g')
+            diagnosisResult="Insecure Registry 사용됨: $insecure_registry"
+            status="취약"
+        else
+            # Check Docker info for insecure registries
+            insecure_registry_info=$(docker info --format 'Insecure Registries: {{.RegistryConfig.InsecureRegistryCIDRs}}')
+            if [[ "$insecure_registry_info" == *"localhost"* ]] || [[ "$insecure_registry_info" == *"127.0.0.1"* ]] || [[ "$insecure_registry_info" == *"https"* ]]; then
+                diagnosisResult="Insecure Registry 사용되지 않음"
+                status="양호"
+            else
+                diagnosisResult="Insecure Registry 사용됨: $insecure_registry_info"
+                status="취약"
+            fi
+        fi
+    fi
+
+    # Output result for Insecure Registry check
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "Insecure Registry Check: $diagnosisResult" >> $TMP1
+}
+
+# Run the check for insecure registry usage
+check_insecure_registry
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
