@@ -1,9 +1,75 @@
-	PRC-C-005	기술적 보안	"컨테이너
-가상화
-시스템"	1. 인증 및 접근제어	2. 인증 정책 설정	컨트롤러 별 서비스 계정 자격 증명 사용	3	컨트롤러 매니저의 모든 컨트롤러가 동일한 서비스 계정을 사용할 경우, 단일 컨트롤러의 위협이 다른 컨트롤러에도 영향을 미칠 수 있으므로 각 컨트롤러가 별도의 서비스 계정을 사용하도록 설정되어 있는지를 점검	ㅇ			"* 컨트롤러 매니저 설정 파일(kube-controller-manager.yaml) 또는 프로세스에서 인증관련 매개변수 확인
+#!/bin/bash
 
-  - (방법1) $ ps -ef | grep controller-manager | grep -E use-service-account-credentials | grep -v grep
-  - (방법2) $ grep -E ""use-service-account-credentials"" ""/etc/kubernetes/manifests/kube-controller-manager.yaml"""	"* 양호 - 'use-service-account-credentials'가 true로 설정되어 있을 경우
-* 취약 - 'use-service-account-credentials'가 false로 설정되어 있을 경우
+# Output file for the results
+OUTPUT_CSV="output_service_account_credentials.csv"
+TMP1=$(basename "$0").log
 
-* 디폴트 : false"																	
+# Define the category and other fields for CSV output
+category="기술적 보안"
+code="PRC-C-005"
+riskLevel="3"
+diagnosisItem="컨트롤러 별 서비스 계정 자격 증명 사용"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+# Create CSV header if it does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Write initial values to CSV
+echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+# Function to check if use-service-account-credentials is enabled
+check_use_service_account_credentials() {
+    echo "Checking use-service-account-credentials setting in kube-controller-manager..."
+
+    # Check the kube-controller-manager process for use-service-account-credentials
+    controller_setting=$(ps -ef | grep controller-manager | grep -E 'use-service-account-credentials' | grep -v grep)
+    
+    if [ -n "$controller_setting" ]; then
+        diagnosisResult="'use-service-account-credentials'가 true로 설정됨"
+        status="양호"
+    else
+        diagnosisResult="'use-service-account-credentials'가 false로 설정됨"
+        status="취약"
+    fi
+    
+    # Log the result
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "'use-service-account-credentials' Setting: $diagnosisResult" >> $TMP1
+}
+
+# Function to check controller-manager YAML configuration for use-service-account-credentials
+check_controller_manager_config() {
+    echo "Checking kube-controller-manager.yaml for use-service-account-credentials..."
+
+    # Check the kube-controller-manager YAML for use-service-account-credentials setting
+    yaml_setting=$(grep -E "use-service-account-credentials" "/etc/kubernetes/manifests/kube-controller-manager.yaml")
+    
+    if [ -n "$yaml_setting" ]; then
+        diagnosisResult="'use-service-account-credentials'가 true로 설정됨"
+        status="양호"
+    else
+        diagnosisResult="'use-service-account-credentials'가 false로 설정됨"
+        status="취약"
+    fi
+    
+    # Log the result
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "kube-controller-manager.yaml Setting: $diagnosisResult" >> $TMP1
+}
+
+# Check use-service-account-credentials in controller-manager process
+check_use_service_account_credentials
+
+# Check use-service-account-credentials in kube-controller-manager.yaml
+check_controller_manager_config
+
+# Output the detailed results to the terminal
+cat $TMP1
+
+# Output the CSV file contents
+echo ; echo
+cat $OUTPUT_CSV
