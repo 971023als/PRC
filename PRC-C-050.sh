@@ -1,31 +1,100 @@
-	PRC-C-050	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	6. 컨테이너 리소스	Ulimit 구성의 적절성	2	"컨테이너는 호스트 시스템의 리소스를 공유하기 때문에, 하나의 컨테이너가 너무 많은 자원을 소비하는 경우 호스트 시스템 가용성에 문제가 발생될 수 있으므로, ulimit 설정을 통해 컨테이너의 자원 제한 여부를 점검
+#!/bin/bash
 
-* ulimit(user limit) : 사용자가 생성할 수 있는 프로세스 수, 열 수 있는 파일의 수, 사용할 수 있는 메모리 양 등을 제한하기 위한 명령"			ㅇ					"**""default-ulimit(user limit)""은 Docker 데몬에서 컨테이너 내에서 실행되는 프로세스의 자원(파일 디스크럽터 수, 프로세스 개수 등)에 제한을 지정하는 옵션으로 관련 설정 존재 여부를 확인**
+. function.sh
 
-* (방법1) PS 명령어를 사용하여 Docker 데몬(dockerd) 명령줄의 'default-ulimit' 인자값 확인
-> $ ps -ef | grep 'dockerd' | grep ""default-ulimit"" | grep -v grep
->> root     12345   1     0   Jul09   ?   00:00:00 dockerd --default-ulimit nofile=1024:2048 --default-ulimit nproc=1000 --default-ulimit fsize=1048576:2097152 --default-ulimit memlock=unlimited:unlimited --default-ulimit core=unlimited
+OUTPUT_CSV="output.csv"
 
-* (방법2) docker 설정파일(/etc/docker/daemon.json)을 열어 'default-ulimit' 값 확인
-> $ sudo cat /etc/docker/daemon.json | grep ""default-ulimit""
->>""default-ulimit"": {
-  ""nofile"": ""1024:2048"",
-  ""nproc"": ""1000""
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-050"
+riskLevel="2"
+diagnosisItem="Ulimit 구성의 적절성"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-050"
+diagnosisItem="Docker 데몬의 default-ulimit 옵션 및 개별 컨테이너 ulimit 설정 점검"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: Docker 데몬에 'default-ulimit' 옵션이 존재하거나, 개별 컨테이너에 'ulimit' 옵션이 설정되어 있는 경우
+[취약]: Docker 데몬에 'default-ulimit' 옵션이 존재하지 않거나, 개별 컨테이너에 'ulimit' 옵션이 설정되지 않은 경우
+EOF
+
+BAR
+
+# Function to check Docker daemon default-ulimit settings
+check_docker_ulimit() {
+    local ulimit_check=""
+    local daemon_ulimit=""
+
+    # Check Docker daemon for default-ulimit parameter
+    daemon_ulimit=$(ps -ef | grep 'dockerd' | grep 'default-ulimit' | grep -v grep)
+
+    if [ ! -z "$daemon_ulimit" ]; then
+        # Daemon configuration is found with default-ulimit
+        diagnosisResult="Docker 데몬에 'default-ulimit' 옵션이 설정되어 있습니다."
+        status="양호"
+    else
+        # Check for ulimit configuration in container
+        diagnosisResult="Docker 데몬에 'default-ulimit' 옵션이 설정되어 있지 않습니다. 개별 컨테이너에서 ulimit 설정을 확인해야 합니다."
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    fi
+
+    # Output to CSV
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
 }
 
-* (방법3) 아래 명령어 실행 후, 'DefaultUlimit' 값 확인
-> docker system info --format '{{.DefaultUlimit}}'
->> map[nofile:1024:2048 nproc:1000:2000 fsize:1048576:2097152 memlock:unlimited:unlimited core:unlimited:unlimited]
+# Function to check individual container ulimit settings
+check_container_ulimit() {
+    local container_id=$1
+    local container_ulimit=""
 
+    # Check if ulimit is set for the container
+    container_ulimit=$(docker inspect --format '{{.HostConfig.Ulimits}}' $container_id)
 
-* (참고) ""default-ulimit"" 옵션 종류
-   - nofile: 컨테이너의 파일 디스크립터 수 제한
-   - nproc: 컨테이너의 프로세스 개수 제한
-   - fsize: 컨테이너에서 생성되는 파일의 크기 제한
-   - memlock: 잠긴 메모리의 최대 크기 제한
-   - core: 코어 덤프 파일 크기 제한"	"* 양호: Docker 데몬에 'default-ulimit' 옵션이 존재하거나, 개별 컨테이너에 'ulimit' 옵션이 존재할 경우
-* 취약: Docker 데몬에 'default-ulimit' 옵션이 존재않고, 개별 컨테이너에 'ulimit' 옵션이 존재하지 않을 경우
+    if [ ! -z "$container_ulimit" ]; then
+        diagnosisResult="컨테이너 $container_id에 ulimit 설정이 존재합니다."
+        status="양호"
+    else
+        diagnosisResult="컨테이너 $container_id에 ulimit 설정이 존재하지 않습니다."
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    fi
 
-※ default : 기본적으로 'default-ulimit' 옵션 미설정되어있으며, 호스트 시스템의 ulimit 설정을 상속 (ulimit -a)"													
+    # Output to CSV
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+}
+
+# Check Docker daemon for ulimit settings
+check_docker_ulimit
+
+# Replace with actual container IDs to check individual containers
+container_ids=("container1" "container2")
+
+for container_id in "${container_ids[@]}"; do
+    check_container_ulimit $container_id
+done
+
+# Display results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
