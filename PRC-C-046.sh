@@ -1,10 +1,77 @@
-	PRC-C-046	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	6. 컨테이너 리소스	HostPort 사용 컨테이너의 허용 최소화	4	"HostPort를 사용하는 컨테이너는 호스트 시스템의 포트를 직접 사용할 수 있으므로, 불필요한 HostPort 사용 여부를 점검
+#!/bin/bash
 
-※ 인터넷 또는 내부 네트워크를 통해 직접적인 접속이 불필요한 서비스(WAS, DB)의 경우 hostport 노출 최소화 필요"	ㅇ			"* 개별 POD에서 hostNetwork 설정의 적용 여부를 확인
+. function.sh
 
-  $ kubectl get pod [POD] -n [namespaces] -o jsonpath=""{range .spec.containers[*]}{.name}|{range .ports[*]}{.name}:{.containerPort}:{.hostPort}:{.protocol};{end}{end}"""	"* 양호 - 불필요한 hostPort 가 존재 하지 않을 경우
-* 취약 - 불필요한 hostPort 가 존재 하는 경우
+OUTPUT_CSV="output.csv"
 
-※ 'kube-system' 네임스페이스에 포함된, 쿠버네티스 마스터 컴포넌트(API Server, Scheduler, Controller-manager 등), 시스템 애드온(DNS 서비스, 대시보스, 리소스 메트릭 서버 등) 등 기타 시스템(로그 수집기, 모니터링 에이전트 등)의 경우 대상에서 제외 (단, 'kube-public'은 포함)"																	
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-046"
+riskLevel="4"
+diagnosisItem="HostPort 사용 컨테이너의 허용 최소화"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-046"
+diagnosisItem="HostPort 사용 컨테이너의 허용 최소화"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 불필요한 hostPort가 존재하지 않는 경우
+[취약]: 불필요한 hostPort가 존재하는 경우
+EOF
+
+BAR
+
+# Function to check hostPort usage in Kubernetes Pods
+check_hostport_k8s() {
+    local pod_name=$1
+    local namespace=$2
+
+    # Retrieve hostPort usage from the pod container specifications
+    host_ports=$(kubectl get pod $pod_name -n $namespace -o jsonpath="{range .spec.containers[*]}{.name}|{range .ports[*]}{.name}:{.containerPort}:{.hostPort}:{.protocol};{end}{end}")
+
+    # Check if any container in the pod has a hostPort set
+    if [[ "$host_ports" =~ ":0:" ]]; then
+        diagnosisResult="Pod $pod_name in namespace $namespace has unnecessary hostPort exposure."
+        status="취약"
+        echo "WARN: $diagnosisResult" >> $TMP1
+    else
+        diagnosisResult="Pod $pod_name in namespace $namespace has no unnecessary hostPort exposure."
+        status="양호"
+    fi
+
+    # Output to CSV
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+}
+
+# Checking hostPort usage for Kubernetes pods
+pods=$(kubectl get pods --all-namespaces --no-headers | grep -v "kube-system" | awk '{print $1 " " $2}')
+
+for pod in $pods; do
+    pod_name=$(echo $pod | cut -d ' ' -f 1)
+    namespace=$(echo $pod | cut -d ' ' -f 2)
+    check_hostport_k8s $pod_name $namespace
+done
+
+# Display results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
