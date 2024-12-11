@@ -1,11 +1,71 @@
-	PRC-C-039	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	4. 컨테이너 장치	컨테이너의 불필요한 외부 장치 연결	3	컨테이너에 호스트 장치가 연결되어 있을 경우, 컨테이너는 호스트의 장치 제거 등의 행위를 통해 예측하지 못한 위협을 발생 시킬 수 있으므로 불필요한 장치 연결 비활성화 여부를 점검	ㅇ		ㅇ	"*파드의 볼륨 구성(volumes, volumeMouts)을 확인
+#!/bin/bash
 
-  $ kubectl get pod [pod] -n [namespace] -o jsonpath={range .spec.containers[*]}{.name}{'|'}[{range .volumeMounts[*]}{.name}:{.mountPath};{end}]{end}{'|'}[{range .spec.volumes[*]}{.name}:{.hostPath.path}:{.hostPath.type};{end}]"	"* 양호 - 'volumeMounts'에 불필요한 장치가 마운트되어 있지 않을 경우
-* 취약 - 'volumeMounts'에 불필요한 장치가 마운트되어 있을 경우"			"**아래 명령어 실행 후, 'HostConfig.Devices' 설정 확인**
-> $ docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: Devices={{ .HostConfig.Devices }}'
->> - container_id1: Devices=[{PathOnHost:/dev/ttyUSB0 PathInContainer:/dev/ttyUSB0 CgroupPermissions:rwm}]  # '/dev/ttyUSB0' 장치가 컨테이너와 연결
->> - container_id2: Devices=[]  # 컨테이너에 연결된 장치가 없음
->> - container_id3: Devices=abcd1234efgh: Devices=[{PathOnHost:/dev/ttyUSB0 PathInContainer:/dev/ttyUSB0 CgroupPermissions:rwm}, {PathOnHost:/dev/ttyUSB1 PathInContainer:/dev/ttyUSB1 CgroupPermissions:rwm}] # '/dev/ttyUSB0'와 '/dev/ttyUSB1' 장치가 컨테이너와 연결"	"* 양호: 'HostConfig.Devices'에 불필요한 장치가 마운트되어 있지 않을 경우
-* 취약: 'HostConfig.Devices'에 불필요한 장치가 마운트되어 있을 경우"													
+. function.sh
+
+OUTPUT_CSV="output.csv"
+
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-039"
+riskLevel="3"
+diagnosisItem="컨테이너의 불필요한 외부 장치 연결"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-039"
+diagnosisItem="컨테이너의 불필요한 외부 장치 연결"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 'HostConfig.Devices'에 불필요한 장치가 마운트되어 있지 않을 경우
+[취약]: 'HostConfig.Devices'에 불필요한 장치가 마운트되어 있을 경우
+EOF
+
+BAR
+
+# Function to check for unnecessary devices in Docker container
+check_docker_devices() {
+    # Retrieve the devices mounted to each container
+    devices=$(docker ps --quiet --all | xargs docker inspect --format '{{ .Id }}: Devices={{ .HostConfig.Devices }}')
+    
+    # Check each container's devices
+    while IFS= read -r line; do
+        container_id=$(echo "$line" | cut -d':' -f1)
+        container_devices=$(echo "$line" | cut -d'=' -f2-)
+
+        if [[ "$container_devices" == "Devices=[]" ]]; then
+            diagnosisResult="불필요한 장치 없음."
+            status="양호"
+        else
+            diagnosisResult="불필요한 장치가 마운트됨: $container_devices"
+            status="취약"
+        fi
+
+        echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    done <<< "$devices"
+}
+
+# Checking for unnecessary devices in Docker containers
+check_docker_devices
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
