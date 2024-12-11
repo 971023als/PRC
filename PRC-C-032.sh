@@ -1,15 +1,89 @@
-	PRC-C-032	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	3. 컨테이너 가용성	컨테이너의 상태 보존 설정	2	"컨테이너 런타임 데몬이 장애 또는 업데이트로 인한 재시작 발생으로 인한 컨테이너의 가용성 확보를 위해, 컨테이너의 상태를 보존하기 위한 옵션 설정 여부를 점검
+#!/bin/bash
 
-※ LiveRestoreEnabled 옵션이 활성화 되어 있을 경우 Docker daemon을 재시작하더라도 실행 중인 컨테이너들은 중지되지 않아 서비스 가용성 확보 가능"			ㅇ					"**Live Restore 옵션은 Docker 컨테이너가 처음 실행될 때의 권한 상태를 유지하도록 하여, 이후에는 권한을 더 얻을 수 없도록 하는 옵션으로 관련 설정 존재 여부를 확인**
+. function.sh
 
-* (방법1) PS 명령어를 사용하여 Docker 데몬(dockerd) 명령줄의 'live-restore' 인자값 확인
-> $ ps -ef | grep 'dockerd' | grep ""live-restore"" | grep -v grep
->> root     12345   1     0   Jul09   ?   00:00:00 dockerd --live-restore
-* (방법2) 아래 명령어 실행 후, 'Storage Driver' 값 확인
-> $ docker info --format '{{ .LiveRestoreEnabled }}' 
->> true"	"* 양호: 컨테이너 상태 보존 설정을 위한 Live Restore 설정이 존재하는 경우
-* 취약: 컨테이너 상태 보존 설정을 위한 Live Restore 설정이 존재하지 않는 경우
+OUTPUT_CSV="output.csv"
 
-※ 기본값 : 비활성화"													
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Initial Values
+category="기술적 보안"
+code="PRC-C-032"
+riskLevel="2"
+diagnosisItem="컨테이너의 상태 보존 설정"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+BAR
+
+CODE="PRC-C-032"
+diagnosisItem="컨테이너의 상태 보존 설정"
+
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 'Live Restore' 옵션이 활성화 되어 있는 경우
+[취약]: 'Live Restore' 옵션이 비활성화 되어 있는 경우
+EOF
+
+BAR
+
+# Function to check if LiveRestore option is enabled for Docker daemon
+check_live_restore() {
+    # Method 1: Check if 'live-restore' argument is present in 'dockerd' process
+    live_restore_process=$(ps -ef | grep 'dockerd' | grep 'live-restore' | grep -v grep)
+
+    if [ -n "$live_restore_process" ]; then
+        diagnosisResult="Live Restore 설정이 존재"
+        status="양호"
+    else
+        diagnosisResult="Live Restore 설정이 존재하지 않음"
+        status="취약"
+    fi
+
+    # Output result to CSV
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+    # Log the result
+    echo "Live Restore check: $diagnosisResult" >> $TMP1
+}
+
+# Function to check LiveRestoreEnabled value from 'docker info'
+check_docker_info() {
+    live_restore_info=$(docker info --format '{{ .LiveRestoreEnabled }}')
+
+    if [ "$live_restore_info" == "true" ]; then
+        diagnosisResult="Live Restore 설정이 존재"
+        status="양호"
+    else
+        diagnosisResult="Live Restore 설정이 존재하지 않음"
+        status="취약"
+    fi
+
+    # Output result to CSV
+    echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+    # Log the result
+    echo "Live Restore check from docker info: $diagnosisResult" >> $TMP1
+}
+
+# Run the checks
+check_live_restore
+check_docker_info
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV

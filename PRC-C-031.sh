@@ -1,21 +1,94 @@
-	PRC-C-031	기술적 보안	"컨테이너
-가상화
-시스템"	3. 컨테이너 관리	2. 컨테이너 권한 관리	컨테이너의 관리자 권한 실행	4	컨테이너가 관리자(root)로 실행될 경우, 컨테이너 내부에서의 공격이 호스트 시스템에 영향을 미칠 수 있으므로 일반 사용자 계정으로 컨테이너 실행 여부를 점검	ㅇ		ㅇ	"* 개별 POD에서 runAsUser 또는 runAsNonRoot 설정 확인
+#!/bin/bash
 
-  $ kubectl get pod [POD] -n [namespaces] -o jsonpath=""{range .spec.containers[*]}{.name}{'|'}securityContext.runAsUser:'{.securityContext.runAsUser}'|securityContext.runAsNonRoot:'{.securityContext.runAsNonRoot}'{''}{end}""
+. function.sh
 
+OUTPUT_CSV="output.csv"
 
+# Set CSV Headers if the file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
 
-"	"* 양호 - ''runAsNonRoot=true' & 'runAsUser=루트가 아닌 값',  'runAsNonRoot' 미지정 & 'runAsUser=루트가 아닌 값', 
-* 취약 - 'runAsNonRoot=false' & 'runAsUser' 미지정, 'runAsNonRoot=false' & 'runAsUser=0', 'runAsNonRoot' 미지정 & 'runAsUser' 미지정
+# Initial Values
+category="기술적 보안"
+code="PRC-C-031"
+riskLevel="4"
+diagnosisItem="컨테이너의 관리자 권한 실행"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
 
-※ default : runAsNonRoot=false, runAsUser=0
-※ 'kube-system' 네임스페이스에 포함된, 쿠버네티스 마스터 컴포넌트(API Server, Scheduler, Controller-manager 등), 시스템 애드온(DNS 서비스, 대시보스, 리소스 메트릭 서버 등) 등 기타 시스템(로그 수집기, 모니터링 에이전트 등)의 경우 대상에서 제외 (단, 'kube-public'은 포함)"			"**아래 명령어 실행 후, uid 확인**
+BAR
 
-* (방법) 
-> $ docker ps --quiet | xargs -I{} sh -c ""docker exec {} cat /proc/1/status | grep '^Uid:' | awk '{print \$3}'""
->> 0
+CODE="PRC-C-031"
+diagnosisItem="컨테이너의 관리자 권한 실행"
 
-"	"* 양호: 일반 유저 계정으로 컨테이너를 실행한 경우
-* 취약: 관리자 계정(root)으로 컨테이너를 실행한 경우
-"													
+# Write initial values to CSV
+echo "$category,$CODE,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+TMP1=$(basename "$0").log
+> $TMP1
+
+BAR
+
+cat << EOF >> $TMP1
+[양호]: 컨테이너가 관리자 권한이 아닌 일반 유저 계정으로 실행된 경우
+[취약]: 컨테이너가 관리자(root) 권한으로 실행된 경우
+EOF
+
+BAR
+
+# Function to check if containers are running as root (uid=0)
+check_run_as_user() {
+    # Method 1: Check Kubernetes pod configuration
+    kubectl get pod -n [namespace] -o jsonpath="{range .items[*]}{.metadata.name}{': '}{.spec.containers[*].name}{' | runAsUser: '}{.spec.securityContext.runAsUser}{' | runAsNonRoot: '}{.spec.securityContext.runAsNonRoot}{'\n'}{end}" > $TMP1
+
+    while read -r line; do
+        pod_name=$(echo $line | cut -d ':' -f1)
+        container_info=$(echo $line | cut -d ':' -f2)
+        run_as_user=$(echo $container_info | awk -F 'runAsUser: ' '{print $2}' | cut -d ' ' -f1)
+        run_as_non_root=$(echo $container_info | awk -F 'runAsNonRoot: ' '{print $2}' | cut -d ' ' -f1)
+
+        if [[ "$run_as_user" -eq 0 ]] || [[ "$run_as_non_root" == "false" ]] || [[ -z "$run_as_user" && -z "$run_as_non_root" ]]; then
+            diagnosisResult="관리자 권한(root)으로 실행"
+            status="취약"
+        else
+            diagnosisResult="일반 사용자 계정으로 실행"
+            status="양호"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "$pod_name: $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Function to check if containers are running as root using Docker command
+check_docker_run_as_user() {
+    docker ps --quiet | xargs -I{} sh -c "docker exec {} cat /proc/1/status | grep '^Uid:' | awk '{print \$3}'" > $TMP1
+
+    while read -r line; do
+        if [ "$line" -eq 0 ]; then
+            diagnosisResult="관리자 권한(root)으로 실행"
+            status="취약"
+        else
+            diagnosisResult="일반 사용자 계정으로 실행"
+            status="양호"
+        fi
+
+        # Output result to CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "Container with UID: $line - $diagnosisResult" >> $TMP1
+    done < $TMP1
+}
+
+# Run the checks for Kubernetes and Docker
+check_run_as_user
+check_docker_run_as_user
+
+# Output results
+cat $TMP1
+
+echo ; echo
+
+cat $OUTPUT_CSV
