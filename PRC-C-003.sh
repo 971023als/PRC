@@ -1,9 +1,55 @@
-	PRC-C-003	기술적 보안	"컨테이너
-가상화
-시스템"	1. 인증 및 접근제어	1. 서비스 어카운트 관리	기본 서비스 계정(default) 사용	4	기본 서비스 계정은 네임스페이스 내의 모든 리소스에 대한 접근 권한을 가질 수 있으므로, 불필요한 기본 서비스 계정 사용 유무를 점검	ㅇ			"* 서비스 계정 목록 확인 후, 기본 계정 사용 여부를 확인
+#!/bin/bash
 
-  $ kubectl get pods -A -o=jsonpath='{range .items[*]}{.metadata.name}:{.metadata.namespace}:{.spec.serviceAccountName}{""
-""}{end}'"	"* 양호 - POD가 기본 서비스 계정(default)를 사용하고 있지 않을 경우
-* 취약 - POD가 기본 서비스 계정(default)를 사용하고 있는 경우
+# Output file for the results
+OUTPUT_CSV="output_default_service_account_usage.csv"
+TMP1=$(basename "$0").log
 
-※ 'kube-system' 네임스페이스에 포함된, 쿠버네티스 마스터 컴포넌트(API Server, Scheduler, Controller-manager 등), 시스템 애드온(DNS 서비스, 대시보스, 리소스 메트릭 서버 등) 등 기타 시스템(로그 수집기, 모니터링 에이전트 등)의 경우 대상에서 제외 (단, 'kube-public'은 포함)"																	
+# Define the category and other fields for CSV output
+category="기술적 보안"
+code="PRC-C-003"
+riskLevel="4"
+diagnosisItem="기본 서비스 계정 사용"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
+
+# Create CSV header if it does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
+
+# Write initial values to CSV
+echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+
+# Function to check for default service account usage in non-system namespaces
+check_default_service_account_usage() {
+    echo "Checking for default service account usage in non-system namespaces..."
+
+    # Check all pods in all namespaces for the service account being used
+    kubectl get pods -A -o=jsonpath='{range .items[*]}{.metadata.name}:{.metadata.namespace}:{.spec.serviceAccountName}{"\n"}{end}' > $TMP1
+
+    # Search for pods using the default service account
+    default_service_account_usage=$(grep ":default$" $TMP1)
+
+    if [ -n "$default_service_account_usage" ]; then
+        diagnosisResult="POD가 기본 서비스 계정(default)을 사용하고 있음"
+        status="취약"
+    else
+        diagnosisResult="POD가 기본 서비스 계정(default)을 사용하지 않음"
+        status="양호"
+    fi
+    
+    # Log the result
+    echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+    echo "POD Default Service Account Usage: $diagnosisResult" >> $TMP1
+}
+
+# Check default service account usage
+check_default_service_account_usage
+
+# Output the detailed results to the terminal
+cat $TMP1
+
+# Output the CSV file contents
+echo ; echo
+cat $OUTPUT_CSV
