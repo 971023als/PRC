@@ -1,42 +1,73 @@
-	PRC-C-007	기술적 보안	"컨테이너
-가상화
-시스템"	2. 시스템 서비스 관리	1. 디렉터리 및 파일 권한 검증	시스템 주요 설정파일(디렉터리)의 권한 설정 미흡	3	시스템 주요 설정파일(디렉터리)에 대한 권한 설정이 미흡할 경우, 설정 정보 위·변조, 정보 노출 등의 위협이 발생될 수 있으므로, 주요 설정파일(디렉터리)의 권한 설정의 적절성을 점검	ㅇ	ㅇ	ㅇ	"* 시스템 주요 설정파일 확인 후, 권한 확인
-  ※ (참고) 일부 환경에서는 구성파일 경로 및 파일명이 상이할 수 있음
+#!/bin/bash
 
-  $ stat -c %a [구성파일]
-  $ stat -c %U:%G [구성파일]"	"* 양호 - 주요 구성 파일(또는 디렉터리)의 권한이 적절하게 설정되어 있는 경우
-* 취약 - 주요 구성 파일(또는 디렉터리)의 권한이 적절하게 구성되어 있지 않은 경우
+# Initialize output file
+OUTPUT_CSV="output_permissions.csv"
+TMP1=$(basename "$0").log
 
-※ (참고) 주요 구성파일 목록
-설정파일 | 디폴트 권한 | 취약 기준(권한)
---------------------------------------------
-kube-apiserver.yaml | 640 | 600
-kube-controller-manager.yaml | 640 | 600
-kube-scheduler.yaml | 640 | 600
-etcd.yaml | 640 | 600
-admin.conf | 600 | 600
-scheduler.conf | 640 | 600
-controller-manager.conf | 640 | 600
-"	"* 시스템 주요 설정파일 확인 후, 권한 확인
-  ※ (참고) 일부 환경에서는 구성파일 경로 및 파일명이 상이할 수 있음
+# Define the list of important configuration files and their expected permissions
+declare -A config_files=(
+    ["kube-apiserver.yaml"]="600"
+    ["kube-controller-manager.yaml"]="600"
+    ["kube-scheduler.yaml"]="600"
+    ["etcd.yaml"]="600"
+    ["admin.conf"]="600"
+    ["scheduler.conf"]="600"
+    ["controller-manager.conf"]="600"
+    ["kubeadm.conf"]="600"
+    ["kubelet.conf"]="600"
+    ["config.yaml"]="600"
+    ["daemon.json"]="644"
+)
 
-  $ stat -c %a [구성파일]
-  $ stat -c %U:%G [구성파일]"	"* 양호 - 주요 구성 파일의 권한 설정이 적절하게 적용되어 있는 경우
-* 취약 - 주요 구성 파일의 권한 설정이 적절하게 적용되어 있지 않은 경우
+# Create CSV header if file does not exist
+if [ ! -f $OUTPUT_CSV ]; then
+    echo "category,code,riskLevel,diagnosisItem,service,diagnosisResult,status" > $OUTPUT_CSV
+fi
 
-※ (참고) 주요 구성파일 목록
-설정파일 | 디폴트 권한 | 취약 기준(권한)
---------------------------------------------
-kubeadm.conf | 640 | 600
-kubelet.conf | 640 | 600
-config.yaml | 640 | 600"	"* 시스템 주요 설정파일 확인 후, 권한 확인
-  ※ (참고) 일부 환경에서는 구성파일 경로 및 파일명이 상이할 수 있음
+# Initial Values
+category="기술적 보안"
+code="PRC-C-007"
+riskLevel="3"
+diagnosisItem="시스템 주요 설정파일(디렉터리)의 권한 설정 미흡"
+service="컨테이너 가상화 시스템"
+diagnosisResult=""
+status=""
 
-  $ stat -c %a [구성파일]
-  $ stat -c %U:%G [구성파일]"	"* 양호 - 주요 구성 파일(또는 디렉터리)의 권한이 적절하게 설정되어 있는 경우
-* 취약 - 주요 구성 파일(또는 디렉터리)의 권한이 적절하게 구성되어 있지 않은 경우
+# Write initial values to CSV
+echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
 
-※ (참고) 주요 구성파일 목록
-설정파일 | 디폴트 권한 | 취약 기준(권한)
---------------------------------------------
-daemon.json | - | 644"													
+# Begin checking the permissions of each critical configuration file
+for file in "${!config_files[@]}"; do
+    expected_permission=${config_files[$file]}
+
+    # Check if the file exists
+    if [ -f "$file" ]; then
+        current_permission=$(stat -c %a "$file")
+        owner_group=$(stat -c %U:%G "$file")
+
+        # Check if the current permission matches the expected permission
+        if [ "$current_permission" == "$expected_permission" ]; then
+            diagnosisResult="권한이 적절함"
+            status="양호"
+        else
+            diagnosisResult="권한 설정이 부적절함"
+            status="취약"
+        fi
+
+        # Log the result to the CSV
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "파일: $file, 권한: $current_permission, 소유자: $owner_group" >> $TMP1
+    else
+        diagnosisResult="파일이 존재하지 않음"
+        status="취약"
+        echo "$category,$code,$riskLevel,$diagnosisItem,$service,$diagnosisResult,$status" >> $OUTPUT_CSV
+        echo "파일: $file, 권한 설정 실패: 파일이 존재하지 않음" >> $TMP1
+    fi
+done
+
+# Output results to terminal
+cat $TMP1
+
+# Output the CSV file contents
+echo ; echo
+cat $OUTPUT_CSV
